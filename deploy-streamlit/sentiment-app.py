@@ -1,0 +1,485 @@
+import streamlit as st
+import torch
+import torch.nn.functional as F
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# ─── Page Config ─────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="SentimentAI – Analisis Sentimen Indonesia",
+    page_icon="🧠",
+    layout="wide",
+)
+
+# ─── Custom CSS ──────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Sora', sans-serif;
+}
+
+/* ── Background ── */
+.stApp {
+    background: #080b14;
+    color: #dde2f0;
+}
+
+/* ── Header banner ── */
+.hero-banner {
+    background: linear-gradient(135deg, #0f1629 0%, #131a2e 60%, #0e1422 100%);
+    border: 1px solid rgba(100,120,255,0.15);
+    border-radius: 20px;
+    padding: 36px 40px 30px;
+    margin-bottom: 28px;
+    position: relative;
+    overflow: hidden;
+}
+.hero-banner::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 260px; height: 260px;
+    background: radial-gradient(circle, rgba(99,102,241,0.18) 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-banner h1 {
+    font-size: 1.95rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 70%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0 0 8px;
+    line-height: 1.2;
+}
+.hero-banner p {
+    color: #8892b0;
+    font-size: 0.92rem;
+    margin: 0;
+    line-height: 1.65;
+}
+
+/* ── Model cards (top row) ── */
+.model-card {
+    background: #0f1423;
+    border: 1px solid rgba(99,102,241,0.2);
+    border-radius: 14px;
+    padding: 16px 18px;
+    text-align: center;
+    margin-bottom: 6px;
+}
+.model-card .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: rgba(99,102,241,0.15);
+    color: #818cf8;
+    border: 1px solid rgba(99,102,241,0.3);
+    margin-bottom: 8px;
+}
+.model-card .model-name {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #e0e5f5;
+    margin-bottom: 4px;
+}
+.model-card .model-repo {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #4b5875;
+    word-break: break-all;
+}
+
+/* ── Input area ── */
+.stTextArea label {
+    color: #a5b4fc !important;
+    font-weight: 600 !important;
+    font-size: 0.9rem !important;
+}
+.stTextArea textarea {
+    background: #0d1120 !important;
+    border: 1px solid rgba(99,102,241,0.25) !important;
+    border-radius: 12px !important;
+    color: #dde2f0 !important;
+    font-family: 'Sora', sans-serif !important;
+    font-size: 0.95rem !important;
+}
+.stTextArea textarea:focus {
+    border-color: rgba(99,102,241,0.6) !important;
+    box-shadow: 0 0 0 3px rgba(99,102,241,0.1) !important;
+}
+
+/* ── Buttons ── */
+.stButton > button {
+    background: linear-gradient(135deg, #4f52c8, #7c3aed) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-family: 'Sora', sans-serif !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    padding: 12px 28px !important;
+    transition: all 0.25s ease !important;
+    width: 100% !important;
+}
+.stButton > button:hover {
+    opacity: 0.88 !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 8px 28px rgba(99,102,241,0.35) !important;
+}
+
+/* ── Result cards ── */
+.result-card {
+    background: #0d1221;
+    border-radius: 16px;
+    padding: 22px 24px;
+    margin-bottom: 14px;
+    border: 1px solid rgba(255,255,255,0.07);
+    transition: transform 0.2s;
+}
+.result-card:hover { transform: translateY(-2px); }
+
+.result-card .rc-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.result-card .rc-model {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #c7d0f0;
+}
+.result-card .rc-repo {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: #4b5875;
+    margin-top: 2px;
+}
+
+/* sentiment badges */
+.badge-pos {
+    background: rgba(34,197,94,0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34,197,94,0.3);
+    padding: 5px 14px;
+    border-radius: 100px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.5px;
+}
+.badge-neg {
+    background: rgba(239,68,68,0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239,68,68,0.3);
+    padding: 5px 14px;
+    border-radius: 100px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.5px;
+}
+.badge-neu {
+    background: rgba(59,130,246,0.15);
+    color: #60a5fa;
+    border: 1px solid rgba(59,130,246,0.3);
+    padding: 5px 14px;
+    border-radius: 100px;
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 0.5px;
+}
+
+/* confidence bar row */
+.bar-row { margin-bottom: 10px; }
+.bar-label {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #8892b0;
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+}
+.bar-bg {
+    background: rgba(255,255,255,0.05);
+    border-radius: 6px;
+    height: 22px;
+    overflow: hidden;
+}
+.bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: white;
+    min-width: 38px;
+    transition: width 0.6s ease;
+}
+.bar-pos { background: linear-gradient(90deg, rgba(34,197,94,0.25), rgba(34,197,94,0.75)); }
+.bar-neg { background: linear-gradient(90deg, rgba(239,68,68,0.25), rgba(239,68,68,0.75)); }
+.bar-neu { background: linear-gradient(90deg, rgba(59,130,246,0.25), rgba(59,130,246,0.75)); }
+
+/* consensus banner */
+.consensus-box {
+    background: linear-gradient(135deg, #0f1629, #141c34);
+    border: 1px solid rgba(99,102,241,0.25);
+    border-radius: 16px;
+    padding: 24px 28px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 24px;
+}
+.consensus-box::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, #6366f1, #a855f7, #ec4899);
+}
+.consensus-box .c-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #6b7280;
+    margin-bottom: 10px;
+}
+.consensus-box .c-result {
+    font-size: 1.9rem;
+    font-weight: 800;
+    margin-bottom: 6px;
+}
+.consensus-box .c-detail {
+    font-size: 0.82rem;
+    color: #6b7280;
+}
+.c-pos { color: #22c55e; }
+.c-neg { color: #ef4444; }
+.c-neu { color: #60a5fa; }
+
+/* Spinner override */
+.stSpinner { color: #818cf8 !important; }
+
+/* Divider */
+hr { border-color: rgba(255,255,255,0.07) !important; }
+
+/* Hide Streamlit footer/header */
+#MainMenu, footer, header { visibility: hidden; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+MODELS = {
+    "IndoBERT": "hafizanw/indobert-sentiment-hormuz",
+    "IndoRoBERTa": "hafizanw/indoroberta-sentiment-hormuz",
+    "IndoBERTweet": "hafizanw/indobertweet-sentiment-hormuz",
+}
+
+LABEL_MAP = {
+    "positive": ("Positif", "😊", "pos"),
+    "negative": ("Negatif", "😞", "neg"),
+    "neutral":  ("Netral",  "😐", "neu"),
+    "pos":      ("Positif", "😊", "pos"),
+    "neg":      ("Negatif", "😞", "neg"),
+    "neu":      ("Netral",  "😐", "neu"),
+}
+
+def normalize_label(raw: str) -> str:
+    r = raw.lower().strip()
+    if "pos" in r:   return "positive"
+    if "neg" in r:   return "negative"
+    if "neu" in r:   return "neutral"
+    # numeric fallbacks (LABEL_0 / LABEL_1 / LABEL_2)
+    if r in ("label_0", "0"): return "negative"
+    if r in ("label_1", "1"): return "neutral"
+    if r in ("label_2", "2"): return "positive"
+    return "neutral"
+
+# ─── Model loader (cached) ────────────────────────────────────────────────────
+@st.cache_resource(show_spinner=False)
+def load_model(model_name: str):
+    repo_id = MODELS[model_name]
+    tokenizer = AutoTokenizer.from_pretrained(repo_id)
+    model = AutoModelForSequenceClassification.from_pretrained(repo_id)
+    model.eval()
+    return tokenizer, model
+
+# ─── Inference ────────────────────────────────────────────────────────────────
+def predict(tokenizer, model, text: str) -> dict:
+    inputs = tokenizer(
+        text, return_tensors="pt",
+        truncation=True, max_length=512, padding=True
+    )
+    with torch.no_grad():
+        logits = model(**inputs).logits
+    probs = F.softmax(logits, dim=-1).squeeze().tolist()
+
+    id2label = model.config.id2label  # e.g. {0: 'NEGATIVE', 1: 'NEUTRAL', 2: 'POSITIVE'}
+
+    scores = {"positive": 0.0, "negative": 0.0, "neutral": 0.0}
+    for idx, prob in enumerate(probs):
+        raw_label = id2label.get(idx, str(idx))
+        canonical = normalize_label(raw_label)
+        scores[canonical] += prob  # accumulate in case of aliases
+
+    predicted = max(scores, key=scores.get)
+    return {"scores": scores, "predicted": predicted}
+
+# ─── UI ───────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="hero-banner">
+  <h1>🧠 Analisis Sentimen Indonesia</h1>
+  <p>Bandingkan prediksi tiga model Transformer berbasis IndoBERT secara bersamaan.<br>
+  Masukkan teks, klik Analisis, dan lihat konsensus ketiga model.</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ── Model info row ────────────────────────────────────────────────────────────
+cols = st.columns(3)
+model_meta = [
+    ("M1", "IndoBERT"),
+    ("M2", "IndoRoBERTa"),
+    ("M3", "IndoBERTweet"),
+]
+for col, (badge, name) in zip(cols, model_meta):
+    with col:
+        st.markdown(f"""
+        <div class="model-card">
+          <div class="badge">{badge}</div>
+          <div class="model-name">{name}</div>
+          <div class="model-repo">{MODELS[name]}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# ── Text input ────────────────────────────────────────────────────────────────
+user_text = st.text_area(
+    "📝 Masukkan teks untuk dianalisis",
+    placeholder="Ketik atau paste teks bahasa Indonesia di sini…",
+    height=140,
+)
+
+c1, c2 = st.columns([3, 1])
+with c1:
+    run_btn = st.button("🔍 Analisis Sentimen dengan 3 Model", use_container_width=True)
+with c2:
+    clear_btn = st.button("🗑️ Bersihkan", use_container_width=True)
+
+if clear_btn:
+    st.rerun()
+
+# ── Analysis ──────────────────────────────────────────────────────────────────
+if run_btn:
+    if not user_text.strip():
+        st.warning("Silakan masukkan teks terlebih dahulu.")
+    else:
+        results = {}
+        progress = st.progress(0, text="Memuat model dan menganalisis…")
+
+        for i, model_name in enumerate(MODELS):
+            with st.spinner(f"Memuat {model_name}…"):
+                try:
+                    tok, mdl = load_model(model_name)
+                    results[model_name] = predict(tok, mdl, user_text.strip())
+                except Exception as e:
+                    results[model_name] = {"error": str(e)}
+            progress.progress((i + 1) / len(MODELS), text=f"Selesai: {model_name}")
+
+        progress.empty()
+
+        # ── Consensus ────────────────────────────────────────────────────────
+        valid = {k: v for k, v in results.items() if "error" not in v}
+        if valid:
+            counts = {"positive": 0, "negative": 0, "neutral": 0}
+            for v in valid.values():
+                counts[v["predicted"]] += 1
+            consensus = max(counts, key=counts.get)
+            avg_conf = sum(v["scores"][v["predicted"]] for v in valid.values()) / len(valid)
+            agree_n = counts[consensus]
+            total_n = len(valid)
+
+            name_c, emoji_c, css_c = LABEL_MAP.get(consensus, (consensus, "🤔", "neu"))
+            all_agree = agree_n == total_n
+
+            st.markdown(f"""
+            <div class="consensus-box">
+              <div class="c-label">Kesepakatan Model</div>
+              <div class="c-result c-{css_c}">{emoji_c} {name_c}</div>
+              <div class="c-detail">
+                {"Semua " + str(total_n) + " model sepakat" if all_agree
+                 else str(agree_n) + " dari " + str(total_n) + " model memilih " + name_c}
+                 &nbsp;•&nbsp; Rata-rata kepercayaan: {avg_conf*100:.1f}%
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("### 📊 Hasil per Model")
+
+        # ── Individual cards ──────────────────────────────────────────────────
+        for model_name, res in results.items():
+            repo = MODELS[model_name]
+            short_repo = ("…" + repo[-38:]) if len(repo) > 40 else repo
+
+            if "error" in res:
+                st.markdown(f"""
+                <div class="result-card" style="border-color:rgba(239,68,68,0.3)">
+                  <div class="rc-header">
+                    <div><div class="rc-model">{model_name}</div>
+                    <div class="rc-repo">{short_repo}</div></div>
+                    <span class="badge-neg">⚠ Error</span>
+                  </div>
+                  <p style="color:#ef4444;font-size:0.82rem;margin:0">{res['error']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                continue
+
+            pred = res["predicted"]
+            s = res["scores"]
+            lname, lemoji, lcss = LABEL_MAP.get(pred, (pred, "🤔", "neu"))
+
+            def bar_html(label_id, pct, bar_cls, display_label):
+                return f"""
+                <div class="bar-row">
+                  <div class="bar-label">
+                    <span>{display_label}</span>
+                    <span>{pct:.1f}%</span>
+                  </div>
+                  <div class="bar-bg">
+                    <div class="bar-fill {bar_cls}" style="width:{pct:.1f}%">{pct:.1f}%</div>
+                  </div>
+                </div>"""
+
+            bars = (
+                bar_html("pos", s["positive"]*100, "bar-pos", "Positif") +
+                bar_html("neg", s["negative"]*100, "bar-neg", "Negatif") +
+                bar_html("neu", s["neutral"]*100,  "bar-neu", "Netral")
+            )
+
+            st.markdown(f"""
+            <div class="result-card">
+              <div class="rc-header">
+                <div>
+                  <div class="rc-model">{model_name}</div>
+                  <div class="rc-repo">{short_repo}</div>
+                </div>
+                <span class="badge-{lcss}">{lemoji} {lname}</span>
+              </div>
+              {bars}
+            </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown(
+            "<p style='text-align:center;color:#3a4460;font-size:0.75rem'>"
+            "SentimentAI — IndoBERT · IndoRoBERTa · IndoBERTweet</p>",
+            unsafe_allow_html=True
+        )

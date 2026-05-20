@@ -1,3 +1,6 @@
 data/
 *.csv
 .env
+mlartifacts/
+model/
+mlflow.db
