@@ -265,6 +265,25 @@ html, body, [class*="css"] {
 .c-neg { color: #ef4444; }
 .c-neu { color: #60a5fa; }
 
+/* result card header */
+.result-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    background: #0d1221;
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 14px 14px 0 0;
+    padding: 18px 20px 14px;
+    margin-top: 6px;
+}
+
+/* Streamlit progress bar color overrides */
+.stProgress > div > div > div > div {
+    background: linear-gradient(90deg, #6366f1, #a855f7) !important;
+}
+
 /* Spinner override */
 .stSpinner { color: #818cf8 !important; }
 
@@ -429,53 +448,63 @@ if run_btn:
             repo = MODELS[model_name]
             short_repo = ("…" + repo[-38:]) if len(repo) > 40 else repo
 
-            if "error" in res:
+            with st.container():
+                st.markdown("""<div class="result-card-wrap">""", unsafe_allow_html=True)
+
+                if "error" in res:
+                    st.markdown(f"""
+                    <div class="result-card" style="border-color:rgba(239,68,68,0.3)">
+                      <div class="rc-header">
+                        <div><div class="rc-model">{model_name}</div>
+                        <div class="rc-repo">{short_repo}</div></div>
+                        <span class="badge-neg">⚠ Error</span>
+                      </div>
+                      <p style="color:#ef4444;font-size:0.82rem;margin:0">{res['error']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    continue
+
+                pred = res["predicted"]
+                s = res["scores"]
+                lname, lemoji, lcss = LABEL_MAP.get(pred, (pred, "🤔", "neu"))
+
+                # Card header (HTML — no inline width needed here)
                 st.markdown(f"""
-                <div class="result-card" style="border-color:rgba(239,68,68,0.3)">
-                  <div class="rc-header">
-                    <div><div class="rc-model">{model_name}</div>
-                    <div class="rc-repo">{short_repo}</div></div>
-                    <span class="badge-neg">⚠ Error</span>
+                <div class="result-card-header">
+                  <div>
+                    <div class="rc-model">{model_name}</div>
+                    <div class="rc-repo">{short_repo}</div>
                   </div>
-                  <p style="color:#ef4444;font-size:0.82rem;margin:0">{res['error']}</p>
+                  <span class="badge-{lcss}">{lemoji} {lname}</span>
                 </div>
                 """, unsafe_allow_html=True)
-                continue
 
-            pred = res["predicted"]
-            s = res["scores"]
-            lname, lemoji, lcss = LABEL_MAP.get(pred, (pred, "🤔", "neu"))
+                # Confidence bars — use st.progress (native, always renders)
+                bar_data = [
+                    ("😊 Positif", s["positive"], "#22c55e"),
+                    ("😞 Negatif", s["negative"], "#ef4444"),
+                    ("😐 Netral",  s["neutral"],  "#60a5fa"),
+                ]
+                for blabel, bval, _ in bar_data:
+                    pct = bval * 100
+                    col_label, col_bar, col_pct = st.columns([1.2, 6, 1])
+                    with col_label:
+                        st.markdown(
+                            f"<div style='color:#8892b0;font-size:0.78rem;"
+                            f"font-weight:600;padding-top:6px'>{blabel}</div>",
+                            unsafe_allow_html=True
+                        )
+                    with col_bar:
+                        st.progress(bval)
+                    with col_pct:
+                        st.markdown(
+                            f"<div style='color:#d1d5db;font-size:0.82rem;"
+                            f"font-weight:700;padding-top:6px;text-align:right'>{pct:.1f}%</div>",
+                            unsafe_allow_html=True
+                        )
 
-            def bar_html(label_id, pct, bar_cls, display_label):
-                return f"""
-                <div class="bar-row">
-                  <div class="bar-label">
-                    <span>{display_label}</span>
-                    <span>{pct:.1f}%</span>
-                  </div>
-                  <div class="bar-bg">
-                    <div class="bar-fill {bar_cls}" style="width:{pct:.1f}%">{pct:.1f}%</div>
-                  </div>
-                </div>"""
-
-            bars = (
-                bar_html("pos", s["positive"]*100, "bar-pos", "Positif") +
-                bar_html("neg", s["negative"]*100, "bar-neg", "Negatif") +
-                bar_html("neu", s["neutral"]*100,  "bar-neu", "Netral")
-            )
-
-            st.markdown(f"""
-            <div class="result-card">
-              <div class="rc-header">
-                <div>
-                  <div class="rc-model">{model_name}</div>
-                  <div class="rc-repo">{short_repo}</div>
-                </div>
-                <span class="badge-{lcss}">{lemoji} {lname}</span>
-              </div>
-              {bars}
-            </div>
-            """, unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom:8px'></div>", unsafe_allow_html=True)
 
         st.markdown("<hr>", unsafe_allow_html=True)
         st.markdown(
